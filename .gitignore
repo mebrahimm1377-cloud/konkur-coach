@@ -1,0 +1,10 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+*.zip
+scratch_check*.txt
+textbooks/page_cache/
