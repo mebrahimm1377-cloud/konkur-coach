@@ -1,12 +1,16 @@
 """مدیریت پیام‌های آزاد کاربر (متن، عکس، صدا) و ارسال آن‌ها به AI."""
 
+import io
 import logging
 from datetime import datetime
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from ai.client import ai_client
+from ai.textbook_pages import render_pages
+from ai.textbook_rag import textbook_rag
+from ai.tts import synthesize_speech
 from config import config
 from database.db import get_or_create_user
 from database.models import User
@@ -66,6 +70,39 @@ def _push_history(context: ContextTypes.DEFAULT_TYPE, user_text: str, reply: str
         del history[:-max_messages]
 
 
+async def _maybe_send_textbook_page(message: Message, query: str) -> None:
+    """اگه سوال کاربر به‌وضوح به یک بخش خاص از کتاب درسی مربوط باشه، تصویر همون صفحه رو
+    هم خودکار می‌فرسته (علاوه بر پاسخ متنی)، تا کاربر مجبور نباشه جداگانه /pages بزنه."""
+    chunk = textbook_rag.top_hit(query)
+    if chunk is None:
+        return
+
+    images = render_pages(chunk["book_path"], chunk["page_start"], chunk["page_end"])
+    if not images:
+        return
+
+    await message.chat.send_action(action="upload_photo")
+    caption = f"📖 {chunk['subject']} پایه {chunk['grade']} — صفحه {chunk['page_start']}"
+    for i, image_bytes in enumerate(images):
+        try:
+            await message.reply_photo(photo=io.BytesIO(image_bytes), caption=caption if i == 0 else None)
+        except Exception:
+            logger.exception("خطا در ارسال خودکار تصویر صفحه‌ی کتاب")
+
+
+async def _maybe_reply_voice(message: Message, text: str) -> None:
+    """پاسخ متنی رو به صدا تبدیل و به‌عنوان پیام صوتی هم می‌فرسته (برای پاسخ به پیام صوتی کاربر)."""
+    audio_bytes = await synthesize_speech(text)
+    if not audio_bytes:
+        return
+    try:
+        # edge-tts خروجی MP3 می‌دهد؛ send_voice فقط OGG/Opus را با مدت‌زمان درست نمایش می‌دهد،
+        # پس از reply_audio (که MP3 را هم به‌درستی پخش می‌کند) استفاده می‌کنیم.
+        await message.reply_audio(audio=io.BytesIO(audio_bytes), filename="pasokh.mp3")
+    except Exception:
+        logger.exception("خطا در ارسال پاسخ صوتی")
+
+
 async def handle_free_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """پیام متنی آزاد کاربر را دریافت، به AI ارسال و پاسخ را برمی‌گرداند."""
     if update.message is None or update.message.text is None or update.effective_user is None:
@@ -81,6 +118,7 @@ async def handle_free_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     _push_history(context, user_message, reply)
     await _reply_long_text(update.message, reply)
+    await _maybe_send_textbook_page(update.message, user_message)
 
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -128,3 +166,5 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     _push_history(context, transcribed_text, reply)
     await _reply_long_text(update.message, f"🎙 متن پیامت: «{transcribed_text}»\n\n{reply}")
+    await _maybe_reply_voice(update.message, reply)
+    await _maybe_send_textbook_page(update.message, transcribed_text)

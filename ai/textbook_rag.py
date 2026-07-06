@@ -71,6 +71,18 @@ class TextbookRAG:
                 break
         return results
 
+    def top_hit(self, query: str, min_score: float = 8.0) -> dict | None:
+        """بهترین چانک مرتبط را برمی‌گرداند، فقط اگه امتیازش به‌قدر کافی بالا باشه (برای جلوگیری
+        از فرستادن تصویر صفحه برای سوال‌های عمومی که ربط ضعیفی به یک بخش خاص کتاب دارن)."""
+        if not self.is_ready:
+            return None
+
+        scores = self._bm25.get_scores(_tokenize(query))
+        best_i = max(range(len(self._chunks)), key=lambda i: scores[i])
+        if scores[best_i] < min_score:
+            return None
+        return self._chunks[best_i]
+
     def format_context(self, query: str, top_k: int = 3) -> str | None:
         """چانک‌های مرتبط را به‌صورت یک متن آماده برای تزریق به prompt برمی‌گرداند."""
         chunks = self.search(query, top_k=top_k)
