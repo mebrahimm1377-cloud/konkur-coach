@@ -13,9 +13,15 @@ import sys
 import threading
 
 PROJECT_HOME = "/home/ebrahimjafari/konkur-coach"
+VENV_SITE_PACKAGES = os.path.join(PROJECT_HOME, "venv", "lib", "python3.10", "site-packages")
 
-if PROJECT_HOME not in sys.path:
-    sys.path.insert(0, PROJECT_HOME)
+# محیط سیستمی PythonAnywhere از قبل چند تا پکیج (مثل sqlalchemy/pillow) نصب داره که با
+# نسخه‌ی داخل venv خودمون تداخل می‌کنه (باعث خطای circular import می‌شه). با گذاشتن
+# site-packages ونو در ابتدای sys.path، مطمئن می‌شیم همیشه نسخه‌ی خودمون اول پیدا بشه.
+for path in (VENV_SITE_PACKAGES, PROJECT_HOME):
+    if path in sys.path:
+        sys.path.remove(path)
+    sys.path.insert(0, path)
 
 os.chdir(PROJECT_HOME)
 
