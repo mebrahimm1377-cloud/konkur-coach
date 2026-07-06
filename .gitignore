@@ -8,3 +8,5 @@ venv/
 *.zip
 scratch_check*.txt
 textbooks/page_cache/
+textbooks/*/
+!textbooks/*.json
