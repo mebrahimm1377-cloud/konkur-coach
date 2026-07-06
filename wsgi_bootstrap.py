@@ -18,10 +18,20 @@ VENV_SITE_PACKAGES = os.path.join(PROJECT_HOME, "venv", "lib", "python3.10", "si
 # محیط سیستمی PythonAnywhere از قبل چند تا پکیج (مثل sqlalchemy/pillow) نصب داره که با
 # نسخه‌ی داخل venv خودمون تداخل می‌کنه (باعث خطای circular import می‌شه). با گذاشتن
 # site-packages ونو در ابتدای sys.path، مطمئن می‌شیم همیشه نسخه‌ی خودمون اول پیدا بشه.
-for path in (VENV_SITE_PACKAGES, PROJECT_HOME):
+# ترتیب insert مهمه: آخرین insert شده جلوتر می‌شینه، پس اول PROJECT_HOME بعد VENV_SITE_PACKAGES
+# تا نسخه‌ی venv واقعاً بالاترین اولویت رو داشته باشه (قبلاً برعکس بود و همین باعث
+# conflict بین sqlalchemy سیستمی و نسخه‌ی venv می‌شد).
+for path in (PROJECT_HOME, VENV_SITE_PACKAGES):
     if path in sys.path:
         sys.path.remove(path)
     sys.path.insert(0, path)
+
+# اگه به هر دلیلی (مثلاً import قبلی توسط زیرساخت WSGI خود PythonAnywhere) نسخه‌ی
+# سیستمی sqlalchemy از قبل نیمه‌بارگذاری شده باشه، sys.modules رو پاک می‌کنیم تا
+# import بعدی حتماً از مسیر درست (venv) دوباره و کامل انجام بشه.
+for mod_name in list(sys.modules):
+    if mod_name == "sqlalchemy" or mod_name.startswith("sqlalchemy."):
+        del sys.modules[mod_name]
 
 os.chdir(PROJECT_HOME)
 
