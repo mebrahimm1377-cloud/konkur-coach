@@ -114,7 +114,10 @@ def main() -> None:
     register_agent_jobs(application)
 
     logger.info("بات در حال اجراست...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # stop_signals=None چون این تابع ممکنه داخل یه ترد پس‌زمینه (نه ترد اصلی) اجرا
+    # بشه (مثلاً روی PythonAnywhere که از یه ترد جدا برای اجرای بات استفاده می‌کنیم)،
+    # و signal handler فقط توی ترد اصلی قابل ثبته.
+    application.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=None)
 
 
 if __name__ == "__main__":
