@@ -42,6 +42,12 @@ load_dotenv(os.path.join(PROJECT_HOME, ".env"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wsgi_bootstrap")
 
+# چون ترد پس‌زمینه‌ی بات همزمان با import شدن این فایل استارت می‌شه، ممکنه با
+# importهای دیگه‌ای که uWSGI توی ترد اصلی انجام می‌ده هم‌زمان بشه و باعث
+# circular-import race روی sqlalchemy بشه. با import کردنش همینجا (توی ترد
+# اصلی و قبل از استارت ترد پس‌زمینه) مطمئن می‌شیم کامل و یک‌بار initialize بشه.
+import sqlalchemy  # noqa: F401
+
 _bot_started = False
 _bot_lock = threading.Lock()
 
