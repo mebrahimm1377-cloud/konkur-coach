@@ -1,10 +1,12 @@
 """مدیریت پیام‌های آزاد کاربر (متن، عکس، صدا) و ارسال آن‌ها به AI."""
 
+import asyncio
 import io
 import logging
 from datetime import datetime
 
 from telegram import Message, Update
+from telegram.error import NetworkError
 from telegram.ext import ContextTypes
 
 from ai.client import ai_client
@@ -21,12 +23,30 @@ logger = logging.getLogger(__name__)
 HISTORY_KEY = "chat_history"
 
 
+async def _send_with_retry(send_fn, attempts: int = 3, delay: float = 2.0):
+    """پلن رایگان PythonAnywhere گاهی پروکسی خروجیش با خطای موقت ۵۰۳ جواب می‌ده؛ چند بار
+    دیگه امتحان می‌کنیم قبل از این‌که واقعاً شکست بخوریم."""
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return await send_fn()
+        except NetworkError as error:
+            last_error = error
+            logger.warning("خطای شبکه در ارسال به تلگرام (تلاش %d/%d): %s", attempt + 1, attempts, error)
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+    raise last_error
+
+
 async def _reply_long_text(message, text: str) -> None:
     """متن طولانی (که ممکنه از سقف ۴۰۹۶ کاراکتری تلگرام رد بشه) را در چند پیام پشت‌سرهم می‌فرستد."""
     chunks = split_for_telegram(text)
-    await message.reply_text(chunks[0])
-    for chunk in chunks[1:]:
-        await message.chat.send_message(chunk)
+    try:
+        await _send_with_retry(lambda: message.reply_text(chunks[0]))
+        for chunk in chunks[1:]:
+            await _send_with_retry(lambda c=chunk: message.chat.send_message(c))
+    except NetworkError:
+        logger.exception("ارسال پاسخ به کاربر بعد از چند تلاش هم ناموفق بود")
 
 
 def _remember_user(telegram_user) -> User | None:
@@ -113,7 +133,10 @@ async def handle_free_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     history: list[dict[str, str]] = context.user_data.setdefault(HISTORY_KEY, [])
 
-    await update.message.chat.send_action(action="typing")
+    try:
+        await _send_with_retry(lambda: update.message.chat.send_action(action="typing"))
+    except NetworkError:
+        logger.warning("ارسال وضعیت 'در حال تایپ' ناموفق بود؛ ادامه می‌دیم")
     reply = await ai_client.get_reply(history, user_message, extra_context=_build_extra_context(user))
 
     _push_history(context, user_message, reply)
