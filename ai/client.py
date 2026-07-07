@@ -54,6 +54,9 @@ class AIClient:
         self._model = config.ai_model
         self._vision_model = config.ai_vision_model
         self._audio_model = config.ai_audio_model
+        # مدل کوچک‌تر و سریع‌تر، فقط برای تصمیم‌های ساده‌ی بله/خیر (مثل بررسی ربط موضوعی)
+        # که نیازی به قدرت استدلال مدل اصلی ندارن.
+        self._fast_model = "openai/gpt-oss-20b"
 
     async def get_reply(
         self, history: list[dict[str, str]], user_message: str, extra_context: str | None = None
@@ -108,6 +111,33 @@ class AIClient:
 
         logger.error("همه‌ی تلاش‌ها برای کوچک کردن درخواست هم ناموفق بود: %s", last_error)
         return _API_ERROR_REPLY
+
+    async def is_topic_relevant(self, query: str, excerpt: str) -> bool:
+        """با یک تماس سریع و ارزان، صحت واقعی ارتباط بین سؤال کاربر و یک قطعه متن کتاب رو
+        بررسی می‌کنه. جست‌وجوی کلیدواژه‌ای (BM25) فقط بر اساس هم‌پوشانی کلمات کار می‌کنه و
+        نمی‌تونه واقعاً «معنی» رو بفهمه (مثلاً یه پاراگراف زندگی‌نامه که تصادفاً یه اصطلاح
+        علمی رو ذکر کرده، یا صفحه‌ی جلد/فهرست که اسم کتاب رو تکرار می‌کنه)؛ این تابع همون
+        قضاوت معنایی رو قبل از فرستادن هر عکس صفحه‌ی کتاب به کاربر انجام می‌ده، تا هیچ‌وقت
+        عکس بی‌ربط فرستاده نشه، حتی اگه امتیاز BM25 بالا بوده باشه."""
+        instruction = (
+            "یک دانش‌آموز این سؤال رو پرسیده:\n"
+            f"«{query}»\n\n"
+            "این قطعه متن از یک کتاب درسی استخراج شده:\n"
+            f"«{excerpt[:600]}»\n\n"
+            "آیا این قطعه متن واقعاً و مستقیماً به موضوع سؤال دانش‌آموز مربوطه (نه فقط یک "
+            "اشاره‌ی تصادفی یا کلمه‌ی مشترک)؟ فقط دقیقاً یکی از این دو کلمه رو جواب بده: بله یا خیر."
+        )
+        messages = [{"role": "user", "content": instruction}]
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._fast_model, messages=messages, max_tokens=5, temperature=0
+            )
+            content = response.choices[0].message.content or ""
+            return "بله" in content.strip()
+        except Exception:
+            logger.exception("خطا در بررسی ربط موضوعی؛ برای احتیاط عکس فرستاده نمی‌شود")
+            return False
 
     async def get_vision_reply(self, image_bytes: bytes, caption: str | None) -> str:
         """تصویر ارسالی کاربر (مثلاً عکس دفترچه یا برگه تمرین) را تحلیل می‌کند."""

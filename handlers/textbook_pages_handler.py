@@ -6,6 +6,7 @@ import logging
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from ai.client import ai_client
 from ai.textbook_pages import render_pages
 from ai.textbook_rag import textbook_rag
 
@@ -24,11 +25,17 @@ async def show_textbook_pages(update: Update, context: ContextTypes.DEFAULT_TYPE
     topic = " ".join(context.args)
     chunk = textbook_rag.top_hit(topic)
 
+    not_found_reply = (
+        "چیزی توی کتاب‌های درسی درباره‌ی این موضوع با اطمینان کافی پیدا نکردم. "
+        "لطفاً موضوع رو دقیق‌تر و با کلمه‌ی کلیدی مشخص بنویس (مثلاً «میتوز» به‌جای «فصل ۲ زیست»)."
+    )
+
     if chunk is None:
-        await update.message.reply_text(
-            "چیزی توی کتاب‌های درسی درباره‌ی این موضوع با اطمینان کافی پیدا نکردم. "
-            "لطفاً موضوع رو دقیق‌تر و با کلمه‌ی کلیدی مشخص بنویس (مثلاً «میتوز» به‌جای «فصل ۲ زیست»)."
-        )
+        await update.message.reply_text(not_found_reply)
+        return
+
+    if not await ai_client.is_topic_relevant(topic, chunk["text"]):
+        await update.message.reply_text(not_found_reply)
         return
 
     await update.message.chat.send_action(action="upload_photo")

@@ -92,9 +92,17 @@ def _push_history(context: ContextTypes.DEFAULT_TYPE, user_text: str, reply: str
 
 async def _maybe_send_textbook_page(message: Message, query: str) -> None:
     """اگه سوال کاربر به‌وضوح به یک بخش خاص از کتاب درسی مربوط باشه، تصویر همون صفحه رو
-    هم خودکار می‌فرسته (علاوه بر پاسخ متنی)، تا کاربر مجبور نباشه جداگانه /pages بزنه."""
+    هم خودکار می‌فرسته (علاوه بر پاسخ متنی)، تا کاربر مجبور نباشه جداگانه /pages بزنه.
+
+    چون جست‌وجوی کلیدواژه‌ای (BM25) گاهی چانک بی‌ربطی رو با امتیاز بالا انتخاب می‌کنه
+    (مثلاً به‌خاطر یک کلمه‌ی مشترک تصادفی)، قبل از فرستادن، با یک تماس سریع و ارزان به AI
+    ربط واقعی موضوعی رو هم تأیید می‌کنیم؛ فقط در صورت تأیید عکس فرستاده می‌شه."""
     chunk = textbook_rag.top_hit(query)
     if chunk is None:
+        return
+
+    if not await ai_client.is_topic_relevant(query, chunk["text"]):
+        logger.info("عکس صفحه‌ی کتاب رد شد (ربط موضوعی تأیید نشد): %s", query)
         return
 
     images = render_pages(chunk["book_path"], chunk["page_start"], chunk["page_end"])
