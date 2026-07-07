@@ -3,6 +3,7 @@
 import logging
 import re
 from datetime import datetime
+from pathlib import Path
 
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -10,8 +11,9 @@ from fpdf import FPDF
 
 logger = logging.getLogger(__name__)
 
-_FONT_PATH = "C:/Windows/Fonts/tahoma.ttf"
-_FONT_BOLD_PATH = "C:/Windows/Fonts/tahomabd.ttf"
+_FONTS_DIR = Path(__file__).parent.parent / "assets" / "fonts"
+_FONT_PATH = str(_FONTS_DIR / "Vazirmatn-Regular.ttf")
+_FONT_BOLD_PATH = str(_FONTS_DIR / "Vazirmatn-Bold.ttf")
 
 # پالت رنگی برند
 _DARK_ORANGE = (249, 96, 13)  # #F9600D — تیترها، لوگو، عناصر برجسته

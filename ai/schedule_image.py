@@ -2,6 +2,7 @@
 
 import logging
 from io import BytesIO
+from pathlib import Path
 
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -9,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
-_FONT_PATH = "C:/Windows/Fonts/tahoma.ttf"
+_FONT_PATH = str(Path(__file__).parent.parent / "assets" / "fonts" / "Vazirmatn-Regular.ttf")
 _WIDTH = 900
 _LINE_HEIGHT = 34
 _PADDING = 20
