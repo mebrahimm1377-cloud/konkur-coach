@@ -61,21 +61,24 @@ class AIClient:
         """پاسخ کوچ را برای پیام متنی کاربر با در نظر گرفتن تاریخچه مکالمه برمی‌گرداند.
 
         extra_context در صورت وجود (مثلاً شمارش‌معکوس امتحان) به system prompt اضافه می‌شود.
-        اگه درخواست به‌خاطر حجم زیاد تاریخچه رد بشه (خطای ۴۱۳)، یک‌بار با تاریخچه‌ی کوتاه‌شده دوباره امتحان می‌شود.
+        اگه درخواست به‌خاطر حجم زیاد رد بشه (خطای ۴۱۳)، مرحله‌به‌مرحله سبک‌تر می‌شه: اول
+        تاریخچه کوتاه می‌شه، بعد اگه بازم زیاد بود، متن تزریق‌شده‌ی کتاب درسی (که خودش می‌تونه
+        حجیم باشه و تنها با کوتاه کردن تاریخچه حل نمی‌شه) هم کنار گذاشته می‌شه.
         """
-        system_content = COACH_SYSTEM_PROMPT
+        base_system_content = COACH_SYSTEM_PROMPT
         if extra_context:
-            system_content += f"\n\nزمینه‌ی اضافه درباره‌ی این دانش‌آموز:\n{extra_context}"
+            base_system_content += f"\n\nزمینه‌ی اضافه درباره‌ی این دانش‌آموز:\n{extra_context}"
 
         textbook_context = textbook_rag.format_context(user_message)
+        system_with_textbook = base_system_content
         if textbook_context:
-            system_content += (
+            system_with_textbook += (
                 "\n\nبخش‌های زیر عیناً از متن کتاب‌های درسی رسمی (چاپ ۱۴۰۴-۱۴۰۵) استخراج شده‌اند. اگه سوال "
                 "دانش‌آموز به یکی از این مباحث مربوطه، پاسخت رو بر اساس همین متن واقعی کتاب بده (نه فقط دانش "
                 "عمومی خودت) و اگه لازم بود دقیقاً به شماره صفحه‌ی کتاب اشاره کن:\n\n" + textbook_context
             )
 
-        async def _call(trimmed_history: list[dict[str, str]]) -> str:
+        async def _call(system_content: str, trimmed_history: list[dict[str, str]]) -> str:
             messages = [{"role": "system", "content": system_content}]
             messages.extend(trimmed_history)
             messages.append({"role": "user", "content": user_message})
@@ -83,21 +86,28 @@ class AIClient:
             content = response.choices[0].message.content
             return content.strip() if content else "متاسفانه نتونستم جواب بدم، لطفاً دوباره امتحان کن."
 
-        try:
-            return await _call(history)
-        except APIError as error:
-            if getattr(error, "status_code", None) == 413 and history:
-                logger.warning("درخواست چت خیلی بزرگ بود؛ با تاریخچه‌ی کوتاه‌شده دوباره امتحان می‌شود")
-                try:
-                    return await _call(history[-2:])
-                except Exception:
-                    logger.exception("خطا در تلاش دوم با تاریخچه‌ی کوتاه‌شده")
+        attempts = [(system_with_textbook, history)]
+        if history:
+            attempts.append((system_with_textbook, history[-2:]))
+        if textbook_context:
+            attempts.append((base_system_content, history[-2:] if history else history))
+
+        last_error: Exception | None = None
+        for system_content, trimmed_history in attempts:
+            try:
+                return await _call(system_content, trimmed_history)
+            except APIError as error:
+                if getattr(error, "status_code", None) != 413:
+                    logger.exception("خطا در ارتباط با سرویس AI")
                     return _API_ERROR_REPLY
-            logger.exception("خطا در ارتباط با سرویس AI")
-            return _API_ERROR_REPLY
-        except Exception:
-            logger.exception("خطای غیرمنتظره در دریافت پاسخ از AI")
-            return _GENERIC_ERROR_REPLY
+                logger.warning("درخواست چت خیلی بزرگ بود؛ با نسخه‌ی سبک‌تر دوباره امتحان می‌شود")
+                last_error = error
+            except Exception:
+                logger.exception("خطای غیرمنتظره در دریافت پاسخ از AI")
+                return _GENERIC_ERROR_REPLY
+
+        logger.error("همه‌ی تلاش‌ها برای کوچک کردن درخواست هم ناموفق بود: %s", last_error)
+        return _API_ERROR_REPLY
 
     async def get_vision_reply(self, image_bytes: bytes, caption: str | None) -> str:
         """تصویر ارسالی کاربر (مثلاً عکس دفترچه یا برگه تمرین) را تحلیل می‌کند."""
