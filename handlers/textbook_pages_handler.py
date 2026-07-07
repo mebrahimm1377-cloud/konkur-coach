@@ -11,7 +11,7 @@ from ai.textbook_rag import textbook_rag
 
 logger = logging.getLogger(__name__)
 
-_MAX_RESULTS = 2
+_MAX_RESULTS = 1
 
 
 async def show_textbook_pages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
