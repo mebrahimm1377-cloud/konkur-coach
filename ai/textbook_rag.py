@@ -36,7 +36,48 @@ _STOPWORDS = {
     "طوری", "طور", "جوری", "متوجه", "بشم", "بفهمم", "توضیح", "مثال", "مثل",
     "الان", "دیگه", "دیگر", "فقط", "واقعا", "واقعاً", "یعنی", "پس", "اگه", "اگر",
     "و", "یا", "ولی", "اما", "چون", "زیرا",
+    "فصل", "بخش", "درس", "قسمت", "پایه", "اولش", "دومش",
 }
+
+# وقتی کاربر صریحاً پایه یا نام درس رو تو سؤالش می‌گه (مثلاً «فصل دوم شیمی پایه
+# یازدهم»)، این کلمات ناوبری («فصل»، «بخش») سیگنال موضوعی ندارن و BM25 به‌تنهایی
+# نمی‌تونه پایه‌ی درست رو تشخیص بده (چون کلمه‌ی «یازدهم» لزوماً تو متن کتاب تکرار
+# نمی‌شه). برای همین پایه/درس رو مستقیم از متن سؤال استخراج و به‌عنوان فیلتر قطعی
+# اعمال می‌کنیم تا هیچ‌وقت پایه یا درس اشتباه برنگرده.
+_GRADE_WORDS = {"دهم": 10, "یازدهم": 11, "دوازدهم": 12}
+
+_SUBJECT_ALIASES = {
+    "شیمی": "شیمی",
+    "فیزیک": "فیزیک",
+    "زیست": "زیست‌شناسی",
+    "زیست‌شناسی": "زیست‌شناسی",
+    "ریاضی": "ریاضی",
+    "عربی": "عربی",
+    "فارسی": "فارسی",
+    "نگارش": "نگارش",
+    "دین": "دین و زندگی",
+    "دینی": "دین و زندگی",
+    "انگلیسی": "انگلیسی",
+    "زمین‌شناسی": "زمین‌شناسی",
+    "زمینشناسی": "زمین‌شناسی",
+    "تاریخ": "تاریخ معاصر ایران",
+    "جغرافیا": "جغرافیای ایران",
+    "جغرافی": "جغرافیای ایران",
+    "آزمایشگاه": "آزمایشگاه علوم تجربی",
+    "دفاعی": "آمادگی دفاعی",
+    "رسانه": "تفکر و سواد رسانه‌ای",
+    "سلامت": "سلامت و بهداشت",
+    "بهداشت": "سلامت و بهداشت",
+    "هویت": "هویت اجتماعی",
+}
+
+
+def _detect_filters(query: str) -> tuple[str | None, int | None]:
+    """پایه و/یا نام درس را در صورت ذکر صریح در متن سؤال تشخیص می‌دهد."""
+    tokens = _tokenize(query)
+    grade = next((_GRADE_WORDS[t] for t in tokens if t in _GRADE_WORDS), None)
+    subject = next((_SUBJECT_ALIASES[t] for t in tokens if t in _SUBJECT_ALIASES), None)
+    return subject, grade
 
 # نرمال‌سازی طول سند BM25 (پارامتر b) رو کمتر از پیش‌فرض (۰.۷۵) نگه می‌داریم؛ چون
 # چانک‌های کتاب طول خیلی متفاوتی دارن، مقدار پیش‌فرض به چانک‌های کوتاه که به‌طور
@@ -105,9 +146,16 @@ class TextbookRAG:
         return filtered if filtered else [i for i in ranked if scores[i] > 0]
 
     def search(self, query: str, top_k: int = 3, subject: str | None = None, grade: int | None = None) -> list[dict]:
-        """چانک‌های کتاب درسی مرتبط با query را برمی‌گرداند (خالی اگه ایندکس آماده نباشه)."""
+        """چانک‌های کتاب درسی مرتبط با query را برمی‌گرداند (خالی اگه ایندکس آماده نباشه).
+
+        اگه subject/grade صریحاً پاس داده نشده باشن، از خود متن query (مثلاً «شیمی
+        پایه یازدهم») تشخیص داده و به‌عنوان فیلتر قطعی اعمال می‌شن."""
         if not self.is_ready:
             return []
+
+        detected_subject, detected_grade = _detect_filters(query)
+        subject = subject or detected_subject
+        grade = grade or detected_grade
 
         results = []
         for i in self._ranked_indices(query):
@@ -127,7 +175,15 @@ class TextbookRAG:
         if not self.is_ready:
             return None
 
+        subject, grade = _detect_filters(query)
         ranked = self._ranked_indices(query)
+        if subject or grade:
+            ranked = [
+                i
+                for i in ranked
+                if (not subject or self._chunks[i]["subject"] == subject)
+                and (not grade or self._chunks[i]["grade"] == grade)
+            ]
         if not ranked:
             return None
 
