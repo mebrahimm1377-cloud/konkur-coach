@@ -11,8 +11,6 @@ from ai.textbook_rag import textbook_rag
 
 logger = logging.getLogger(__name__)
 
-_MAX_RESULTS = 1
-
 
 async def show_textbook_pages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """موضوع را جست‌وجو کرده و تصویر صفحات مرتبط از کتاب درسی را می‌فرستد. فرمت: /pages <موضوع>"""
@@ -24,26 +22,26 @@ async def show_textbook_pages(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     topic = " ".join(context.args)
-    results = textbook_rag.search(topic, top_k=_MAX_RESULTS)
+    chunk = textbook_rag.top_hit(topic)
 
-    if not results:
-        await update.message.reply_text("چیزی توی کتاب‌های درسی درباره‌ی این موضوع پیدا نکردم.")
+    if chunk is None:
+        await update.message.reply_text(
+            "چیزی توی کتاب‌های درسی درباره‌ی این موضوع با اطمینان کافی پیدا نکردم. "
+            "لطفاً موضوع رو دقیق‌تر و با کلمه‌ی کلیدی مشخص بنویس (مثلاً «میتوز» به‌جای «فصل ۲ زیست»)."
+        )
         return
 
     await update.message.chat.send_action(action="upload_photo")
 
+    images = render_pages(chunk["book_path"], chunk["page_start"], chunk["page_end"])
+    caption = f"📖 {chunk['subject']} پایه {chunk['grade']} — صفحه {chunk['page_start']}"
     sent_any = False
-    for chunk in results:
-        images = render_pages(chunk["book_path"], chunk["page_start"], chunk["page_end"])
-        caption = f"📖 {chunk['subject']} پایه {chunk['grade']} — صفحه {chunk['page_start']}"
-        for i, image_bytes in enumerate(images):
-            try:
-                await update.message.reply_photo(
-                    photo=io.BytesIO(image_bytes), caption=caption if i == 0 else None
-                )
-                sent_any = True
-            except Exception:
-                logger.exception("خطا در ارسال تصویر صفحه‌ی کتاب")
+    for i, image_bytes in enumerate(images):
+        try:
+            await update.message.reply_photo(photo=io.BytesIO(image_bytes), caption=caption if i == 0 else None)
+            sent_any = True
+        except Exception:
+            logger.exception("خطا در ارسال تصویر صفحه‌ی کتاب")
 
     if not sent_any:
         await update.message.reply_text("متاسفانه نتونستم تصویر صفحه رو بسازم.")
