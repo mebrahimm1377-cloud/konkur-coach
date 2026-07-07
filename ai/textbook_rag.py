@@ -6,6 +6,7 @@
 
 import json
 import logging
+import math
 import re
 from pathlib import Path
 
@@ -15,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 _INDEX_PATH = Path(__file__).parent.parent / "textbooks" / "index.json"
 _TOKEN_RE = re.compile(r"[؀-ۿ]+|[A-Za-z0-9]+")
+
+# نرمال‌سازی طول سند BM25 (پارامتر b) رو کمتر از پیش‌فرض (۰.۷۵) نگه می‌داریم؛ چون
+# چانک‌های کتاب طول خیلی متفاوتی دارن، مقدار پیش‌فرض به چانک‌های کوتاه که به‌طور
+# تصادفی یک کلمه‌ی کلیدی رو (بدون ربط موضوعی واقعی) دارن، امتیاز به‌طرز غیرمنصفانه
+# بالایی می‌ده (مثلاً یک پاراگراف زندگی‌نامه در کتاب تاریخ که اسم رشته‌ی تحصیلی یک
+# شخصیت رو ذکر کرده، برای سوال‌های علمی درباره‌ی همون رشته بالاتر از فصل واقعی می‌شینه).
+_BM25_B = 0.3
 
 
 def _tokenize(text: str) -> list[str]:
@@ -27,6 +35,7 @@ class TextbookRAG:
 
     def __init__(self) -> None:
         self._chunks: list[dict] = []
+        self._tokenized: list[list[str]] = []
         self._bm25: BM25Okapi | None = None
         self._load()
 
@@ -37,30 +46,43 @@ class TextbookRAG:
 
         try:
             self._chunks = json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
-            tokenized = [_tokenize(chunk["text"]) for chunk in self._chunks]
-            self._bm25 = BM25Okapi(tokenized)
+            self._tokenized = [_tokenize(chunk["text"]) for chunk in self._chunks]
+            self._bm25 = BM25Okapi(self._tokenized, b=_BM25_B)
             logger.info("ایندکس کتاب‌های درسی بارگذاری شد: %d چانک", len(self._chunks))
         except Exception:
             logger.exception("خطا در بارگذاری ایندکس کتاب‌های درسی")
             self._chunks = []
+            self._tokenized = []
             self._bm25 = None
 
     @property
     def is_ready(self) -> bool:
         return self._bm25 is not None and bool(self._chunks)
 
+    def _ranked_indices(self, query: str) -> list[int]:
+        """ایندکس چانک‌ها را بر اساس امتیاز BM25 مرتب می‌کند، با فیلتر «پوشش کلمات»:
+        برای کوئری‌های چندکلمه‌ای، چانکی که فقط یکی از چند کلمه‌ی کوئری رو (به‌طور
+        اتفاقی) داره کنار گذاشته می‌شه، تا مثلاً «قانون دوم نیوتن» به یک چانک ریاضی
+        که فقط کلمه‌ی «نیوتن» رو داره (نه «قانون» یا «دوم») نره."""
+        query_tokens = set(_tokenize(query))
+        scores = self._bm25.get_scores(list(query_tokens))
+        min_coverage = math.ceil(len(query_tokens) / 2) if len(query_tokens) > 1 else 1
+
+        ranked = sorted(range(len(self._chunks)), key=lambda i: scores[i], reverse=True)
+        filtered = [
+            i
+            for i in ranked
+            if scores[i] > 0 and len(query_tokens & set(self._tokenized[i])) >= min_coverage
+        ]
+        return filtered if filtered else [i for i in ranked if scores[i] > 0]
+
     def search(self, query: str, top_k: int = 3, subject: str | None = None, grade: int | None = None) -> list[dict]:
         """چانک‌های کتاب درسی مرتبط با query را برمی‌گرداند (خالی اگه ایندکس آماده نباشه)."""
         if not self.is_ready:
             return []
 
-        scores = self._bm25.get_scores(_tokenize(query))
-        ranked = sorted(range(len(self._chunks)), key=lambda i: scores[i], reverse=True)
-
         results = []
-        for i in ranked:
-            if scores[i] <= 0:
-                break
+        for i in self._ranked_indices(query):
             chunk = self._chunks[i]
             if subject and chunk["subject"] != subject:
                 continue
@@ -77,8 +99,12 @@ class TextbookRAG:
         if not self.is_ready:
             return None
 
-        scores = self._bm25.get_scores(_tokenize(query))
-        best_i = max(range(len(self._chunks)), key=lambda i: scores[i])
+        ranked = self._ranked_indices(query)
+        if not ranked:
+            return None
+
+        best_i = ranked[0]
+        scores = self._bm25.get_scores(list(set(_tokenize(query))))
         if scores[best_i] < min_score:
             return None
         return self._chunks[best_i]
