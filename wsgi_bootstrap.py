@@ -71,7 +71,10 @@ def start_bot_once() -> None:
     threading.Thread(target=_run_bot, daemon=True).start()
 
 
-start_bot_once()
+# بات به یه VPS مجزا منتقل شده؛ این نسخه‌ی PythonAnywhere دیگه نباید polling کنه
+# (وگرنه دو نمونه هم‌زمان با یه توکن باعث خطای Conflict توی تلگرام می‌شه).
+if os.environ.get("ENABLE_LOCAL_BOT_THREAD") == "1":
+    start_bot_once()
 
 
 def application(environ, start_response):
